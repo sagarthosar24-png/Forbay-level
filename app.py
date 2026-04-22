@@ -3,55 +3,60 @@ import cv2
 import numpy as np
 from PIL import Image
 
-st.set_page_config(layout="wide")
-st.title("⚓ Anchor-Point Level Calculator")
+st.set_page_config(layout="wide", page_title="Hydro Shift Tool")
+st.title("⚓ Manual Anchor-Point Level Tool")
 
-# --- 1. SET THE SCALE ---
-st.sidebar.header("1. Scale Calibration")
-st.sidebar.info("First, find the distance between two known marks on your gauge.")
-y_95 = st.sidebar.number_input("Pixel Y for 95.00m", value=200)
-y_94_5 = st.sidebar.number_input("Pixel Y for 94.50m (FRL)", value=320)
+st.sidebar.header("Step 1: Calibration")
+# We use 94.5 as the primary anchor because it's clearly marked 'FRL'
+anchor_rl = 94.500 
 
-# Calculate how many pixels represent 0.5 meters
-pixels_per_half_meter = y_94_5 - y_95
-pixels_per_meter = pixels_per_half_meter * 2
+# This defines how many pixels represent 1 meter at this specific camera angle
+pixels_per_meter = st.sidebar.slider("Scale: Pixels per 1.0m", 50, 800, 300)
 
-uploaded_file = st.file_uploader("Upload Gauge Photo", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("Upload Gauge Image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file:
     img = Image.open(uploaded_file)
     img_array = np.array(img)
     h, w, _ = img_array.shape
 
-    # --- 2. ADJUST THE WATER POINTER ---
-    st.subheader("2. Match the Red Line to the Water Surface")
-    water_y = st.slider("Water Surface Pointer", 0, h, y_94_5 + 100)
+    st.subheader("Step 2: Align the Lines")
+    col_img, col_res = st.columns([3, 1])
 
-    # --- 3. THE CALCULATION ---
-    # We calculate distance relative to the 94.5m anchor
-    pixel_diff = y_94_5 - water_y
+    with st.sidebar:
+        st.header("Step 3: Fine Adjust")
+        # Move the anchor to exactly where 94.5 is in THIS specific photo
+        anchor_y = st.slider("Move YELLOW line to 94.50m Mark", 0, h, int(h/3))
+        # Move the water line to the surface
+        water_y = st.slider("Move RED line to Water Surface", 0, h, int(h/2))
+
+    # --- THE MATH ---
+    # Difference in pixels (positive if water is below anchor)
+    pixel_diff = water_y - anchor_y
     # Convert pixels to meters
     meter_diff = pixel_diff / pixels_per_meter
-    # Final RL = 94.5 + (difference)
-    calculated_rl = 94.500 + meter_diff
+    # Final RL = Anchor - Difference (since higher Y pixel means lower elevation)
+    calculated_rl = anchor_rl - meter_diff
 
-    # --- 4. DRAWING ---
+    # --- DRAWING ---
     output_img = img_array.copy()
     
-    # Yellow Anchor Line (Fixed at 94.5)
-    cv2.line(output_img, (0, y_94_5), (w, y_94_5), (255, 255, 0), 3)
-    cv2.putText(output_img, "ANCHOR: 94.50m", (10, y_94_5 - 10), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+    # Draw Anchor Line (Yellow)
+    cv2.line(output_img, (0, anchor_y), (w, anchor_y), (255, 255, 0), 4)
+    cv2.putText(output_img, "94.50m (FRL) ANCHOR", (20, anchor_y - 20), 
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 0), 3)
 
-    # Red Water Line (Moveable)
+    # Draw Water Line (Red)
     cv2.line(output_img, (0, water_y), (w, water_y), (255, 0, 0), 8)
+    cv2.putText(output_img, f"WATER LEVEL: {calculated_rl:.3f}m", (20, water_y + 50), 
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 0, 0), 3)
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
+    with col_img:
         st.image(output_img, use_container_width=True)
-    with col2:
-        st.metric("Final Water Level", f"{calculated_rl:.3f} m")
-        st.write(f"**Distance from FRL:** {abs(meter_diff):.3f} meters")
+    
+    with col_res:
+        st.metric("Final RL", f"{calculated_rl:.3f} m")
+        st.info(f"Water is {meter_diff:.3f}m below FRL")
         
-        if calculated_rl < 93.50:
-            st.warning("Level is below 93.50m")
+        # Display storage calculation if you have your MCM table ready
+        # st.write(f"Estimated Storage: {calculate_mcm(calculated_rl)} MCM")
